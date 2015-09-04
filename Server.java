@@ -2,7 +2,6 @@ import java.io.*;
 import java.net.*;
 import java.text.SimpleDateFormat;
 import java.util.*;
-
 /*
  * The server that can be run both as a console application or a GUI
  */
@@ -10,36 +9,48 @@ public class Server {
 	
 	private static int Werewolves = 2;
 	private static final int Medics = 1;
+
+	private static boolean hasMedicProtectedHimself = false;
 	
-	private static boolean RolesAssigned = false;
+	private static boolean areRolesAssigned = false;
 	private static boolean userFound = false;
 	
 	private static boolean voteInitiated = false;
+	private static boolean skipVoteInitiated = false;
 	private static String currentVoteUser = "";
 	private static int votes = 0;
 	private static int votesCounter = 0;
-	private static boolean skipVote = false;
+	private static int maxLynchPoints = 0;
+	private static String maxLynchPointsUser = "";
+	private static boolean voteIsADraw = false;
+	private static ArrayList<String> tiebreakers = new ArrayList();
+	private static boolean wasThereATieAlready = false;
 	
+	public static String voteScores = "";
 	public static String voteLog = "";
 	private static String log = "";
 	
-	private static int gameState = 0;
+	private static int gameState = 1;
 	
 	private static boolean medicIsDead = false;
 	private static boolean noMoreLivingWerewolves = false;
+	private static boolean weGotABody = false;
 	
-	private static String commandsHelp = ""
-			+ "logout - close your connection"
-			+ "whoisin - list of the currently connected people with their game status\n"
-			+ "play - assigns roles once at the beginning of the game\n"
-			+ "role - tells you your game role\n"
-			+ "protect [name] - protects someone through the night; used by [Medic]\n"
-			+ "kill [name] - kills someone; used by [Werewolf]\n"
-			+ "vote [name] - starts a vote for a player. \n"
-			+ "After the vote has started every player except the one voted against must use one of the next two commands.\n"
-			+ "voteyes - votes with [YES] in the current vote\n"
-			+ "voteno - votes with [NO] in the current vote\n"
-			+ "vote pass - ";
+	private static String commandsHelp = "Command list:\n"
+			+ " logout - close your connection\n"
+			+ " whoisin - list of the currently connected people with their game status\n"
+			+ " play - assigns roles once at the beginning of the game\n"
+			+ " role - tells you your game role\n"
+			+ " protect [name] - protects someone through the night; used by [Medic]\n"
+			+ " kill [name] - kills someone; used by [Werewolf]\n"
+			+ " vote [name] - starts a vote for a player. \n"
+			+ "   After the vote has started every player except the one voted against \n"
+			+ "   must use one of the next two commands.\n"
+			+ " voteyes - votes with [YES] in the current vote\n"
+			+ " voteno - votes with [NO] in the current vote\n"
+			+ " vote pass - skips the day for the village";
+	
+	private static String clearCommand = new String(new char[50]).replace("\0", "\n");
 	
 	// a unique ID for each connection
 	private static int uniqueId;
@@ -228,7 +239,7 @@ public class Server {
 		// the user name of the Client
 		String username;
 		// the only type of message a will receive
-		ChatMessage cm;
+		Message cm;
 		// the date I connect
 		String date;
 		
@@ -237,13 +248,15 @@ public class Server {
 		// 1 - medic
 		// 2 - werewolf
 		// 3 - seer
-		int role = 0;
-		String roleName = "";
+		private int role = 0;
+		private String roleName = "";
 		
-		boolean isProtected = false;
-		boolean isAlive = true;
+		private boolean isProtected = false;
+		private boolean isAlive = true;
 		
 		private boolean hasVoted = false;
+		private boolean canBeVotedAgainst = false;
+		private int lynchScore = 0;
 
 		public int getRole() {
 			return role;
@@ -263,7 +276,7 @@ public class Server {
 				sInput  = new ObjectInputStream(socket.getInputStream());
 				// read the username
 				String temp = (String) (sInput.readObject());
-				username = temp.equals("Anon") ? temp + id : temp;
+				username = temp.equals("Anon") || temp.equalsIgnoreCase("PASS") ? temp + id : temp;
 				display(username + " just connected.");
 			}
 			catch (IOException e) {
@@ -298,10 +311,10 @@ public class Server {
 			while(keepGoing) {
 				// read a String (which is an object)
 				try {
-					cm = (ChatMessage) sInput.readObject();
+					cm = (Message) sInput.readObject();
 				}
 				catch (IOException e) {
-					display(username + " Exception reading Streams: " + e);
+					display(this.username + " Exception reading Streams: " + e);
 					break;				
 				}
 				catch(ClassNotFoundException e2) {
@@ -314,18 +327,20 @@ public class Server {
 				// Switch on the type of message receive
 				switch(cm.getType()) {
 
-				case ChatMessage.MESSAGE:
-					if(isAlive) {
-						broadcast(username + ": " + message);
+				case Message.MESSAGE:
+					if(this.isAlive) {
+						broadcast(this.username + ": " + message);
 					} else {
 						writeMsg("Dead men tell no tales.\n");
 					}
 					break;
-				case ChatMessage.LOGOUT:
-					display(username + " disconnected with a LOGOUT message.\n");
+					
+				case Message.LOGOUT:
+					display(this.username + " disconnected with a LOGOUT message.\n");
 					keepGoing = false;
 					break;
-				case ChatMessage.WHOISIN:
+					
+				case Message.WHOISIN:
 					writeMsg("List of the users connected at " + sdf.format(new Date()) + "\n");
 					
 					int aliveUsers = 0;
@@ -341,11 +356,22 @@ public class Server {
 					}
 					writeMsg("Alive users: " + aliveUsers + "\n");
 					break;
-				case ChatMessage.HELP:
 					
+				case Message.HELP:
+					writeMsg(Server.commandsHelp);
 					break;
-				case ChatMessage.PLAY:
-					if(!Server.RolesAssigned) {
+					
+				case Message.CLEAR:
+					writeMsg(Server.clearCommand);
+					break;
+					
+				case Message.PLAY:
+					if(al.size() < 3) {
+						writeMsg("Not enough players\n");
+						break;
+					}
+					
+					if(!Server.areRolesAssigned) {
 						broadcast("Let's play Werewolves!");						
 						
 						Server.Werewolves = (al.size() >= 8 ? 2 : 1);
@@ -380,7 +406,7 @@ public class Server {
 						}
 						
 						Server.log += "-----\n";
-						Server.RolesAssigned = true;
+						Server.areRolesAssigned = true;
 						broadcast("Roles have been assigned");
 						
 						broadcast("The village falls asleep");
@@ -398,8 +424,9 @@ public class Server {
 					}
 	//banana
 					break;
-				case ChatMessage.ROLE:
-					if(Server.RolesAssigned) {
+					
+				case Message.ROLE:
+					if(Server.areRolesAssigned) {
 						
 						switch (this.role) {
 							case 0:
@@ -417,143 +444,196 @@ public class Server {
 						writeMsg("Roles have not been assigned yet\n");
 					}
 					break;
-				case ChatMessage.PROTECT:
-					if(Server.RolesAssigned) {
-						if(this.isAlive) {
-							if(this.role == 1) {
-								if(Server.gameState == 1) {
-									
-									for(int i = 0; i < al.size(); ++i) {
-										ClientThread ct = al.get(i);
-										
-										if(ct.username.equalsIgnoreCase(message)) {
-											Server.userFound = true;
-											ct.isProtected = true;
-											writeMsg(ct.username + " is now protected\n");
-											Server.log += " " + ct.username + "(" + ct.roleName + ") was protected\n";
-											
-											Server.gameState = 2;
-											broadcast("It's time for the [werewolves] to make their choice");
-										}
-									}
-									
-									if(!Server.userFound) {
-										writeMsg("No such user\n");
-									}
-									Server.userFound = false;
-									
-								} else {
-									writeMsg("You can't protect right now\n");
-								}
-							} else {
-								writeMsg("You don't have the power to protect the ones you love.\n");
+					
+				case Message.PROTECT:
+					if(!Server.areRolesAssigned) {
+						writeMsg("Roles have not been assigned yet\n");
+						break;
+					}
+					
+					if(!this.isAlive) {
+						writeMsg("You're dead. Deal with it.\n");
+						break;
+					}
+					
+					if(this.role != 1) {
+						writeMsg("You don't have the power to protect the ones you love.\n");
+						break;
+					}
+					
+					if(Server.gameState != 1) {
+						writeMsg("You can't protect right now\n");
+						break;
+					}
+			
+					for(int i = 0; i < al.size(); ++i) {
+						ClientThread ct = al.get(i);
+						
+						if(ct.username.equalsIgnoreCase(message)) {
+							if(Server.hasMedicProtectedHimself) {
+								writeMsg("You have already protected yourself once, you egoist.\n");
+								break;
+							}	
+							
+							if(ct.username.equalsIgnoreCase(this.username)) {
+								Server.hasMedicProtectedHimself = true;
 							}
-						} else {
-							writeMsg("You're dead. Deal with it.\n");
+							
+							Server.userFound = true;
+							ct.isProtected = true;
+							writeMsg(ct.username + " is now protected\n");
+							broadcast("A player has been protected.");
+							Server.log += " " + ct.username + "(" + ct.roleName + ") was protected\n";
+							
+							Server.gameState = 2;
+							broadcast("It's time for the [werewolves] to make their choice");
 						}
-						
-					} else {
-						writeMsg("Roles have not been assigned yet\n");
 					}
+					
+					if(!Server.userFound) {
+						writeMsg("No such user\n");
+					}
+					Server.userFound = false;
+									
 					break;
-				case ChatMessage.KILL:
-					if(Server.RolesAssigned) {
-						if(this.isAlive) {
-							if(this.role == 2) {
-								if(Server.gameState == 2) {
+					
+				case Message.KILL:
+					if(!Server.areRolesAssigned) {
+						writeMsg("Roles have not been assigned yet\n");
+						break;
+					}
+					
+					if(!this.isAlive) {
+						writeMsg("You're dead. Deal with it.\n");
+						break;
+					}
+					
+					if(this.role != 2) {
+						writeMsg("You don't have the power to kill the ones you hate.\n");
+						break;
+					}
+					
+					if(Server.gameState != 2) {
+						writeMsg("You can't kill right now\n");
+						break;
+					}
 									
-									for(int i = 0; i < al.size(); ++i) {
-										ClientThread ct = al.get(i);
-										
-										if(ct.username.equalsIgnoreCase(message)) {
-											Server.userFound = true;
-											if(ct.isAlive) {
-												if(!ct.isProtected) {
-													ct.isAlive = false;
-													broadcast(ct.username + " is now dead");
-													Server.log += " " + ct.username + "(" + ct.roleName + ") was [killed]\n";
-													
-												} else {
-													broadcast("The target still [lives]");
-													Server.log += " " + ct.username + "(" + ct.roleName + ") was targeted but was protected\n";
-												}
-												
-												Server.gameState = 0;
-												broadcast("It's time for the village to wake up");
-											} else {
-												writeMsg("The target is already dead\n");
-											}
-										}
-									}
-									
-									if(!Server.userFound) {
-										writeMsg("No such user\n");
-									}
-									Server.userFound = false;
+					for(int i = 0; i < al.size(); ++i) {
+						ClientThread ct = al.get(i);
+						
+						if(ct.username.equalsIgnoreCase(message)) {
+							Server.userFound = true;
+							if(ct.isAlive) {
+								if(!ct.isProtected) {
+									ct.isAlive = false;
+									broadcast(ct.username + " is now dead");
+									Server.log += " " + ct.username + "(" + ct.roleName + ") was [killed]\n";
 									
 								} else {
-									writeMsg("You can't kill right now\n");
+									broadcast("The target still [lives]");
+									Server.log += " " + ct.username + "(" + ct.roleName + ") was targeted but was protected\n";
 								}
+								
+								Server.gameState = 0;
+								broadcast("It's time for the village to wake up");
 							} else {
-								writeMsg("You don't have the power to kill the ones you hate.\n");
+								writeMsg("The target is already dead\n");
 							}
-						} else {
-							writeMsg("You're dead. Deal with it.\n");
-						}	
-						
-					} else {
-						writeMsg("Roles have not been assigned yet\n");
+						}
 					}
-					break;
-				case ChatMessage.VOTE:
-					if(Server.RolesAssigned) {
-						if(this.isAlive) {
-							if(Server.gameState == 0 && !Server.voteInitiated) {
-								
-								if(message.equalsIgnoreCase("PASS")) {
-									Server.userFound = true;
-									
-									Server.currentVoteUser = "PASS";
-									Server.skipVote = true;
-								} else {
-								
-									for(int i = 0; i < al.size(); ++i) {
-										ClientThread ct = al.get(i);
+					
+					if(!Server.userFound) {
+						writeMsg("No such user\n");
+					}
+					Server.userFound = false;
 										
-										if(ct.username.equalsIgnoreCase(message)) {
-											Server.userFound = true;
-											if(ct.isAlive) {
-			
-												Server.currentVoteUser = ct.username;
-												Server.voteInitiated = true;
-												Server.voteLog += " Vote started for " + ct.username + "\n";
-												Server.log += " Vote started for " + ct.username + "(" + ct.roleName + ")\n";
-												broadcast("Vote started for " + ct.username);
-			
-											} else {
-												writeMsg("The target is already dead\n");
-											}
-										}
-									}
-								}
-									
-								if(!Server.userFound) {
-									writeMsg("No such user\n");
-								}
-								Server.userFound = false;
-								
-							} else {
-								writeMsg("You can't start a vote right now\n");
-							}						
-						} else {
-							writeMsg("You're dead. Deal with it.\n");
-						}	
-					} else {
-						writeMsg("Roles have not been assigned yet\n");
-					}
 					break;
-				case ChatMessage.VOTEYES:
-					if(Server.RolesAssigned) {
+					
+				case Message.STARTVOTE:
+					if(!Server.areRolesAssigned) {
+						writeMsg("Roles have not been assigned yet\n");
+						break;
+					}
+					
+					if(!this.isAlive) {
+						writeMsg("You're dead. Deal with it.\n");
+						break;
+					}
+					
+					if(Server.gameState != 0 || Server.voteInitiated) {
+						writeMsg("You can't start a vote right now\n");
+						break;
+					}
+							
+					Server.voteInitiated = true;
+					broadcast(this.username + " has started the voting");
+					Server.voteLog += " " + this.username + " has started the voting\n";
+					Server.log += " " + this.username + "(" + this.roleName + ") has started the voting\n";;
+
+					break;
+					
+				case Message.VOTE:
+					if(!Server.areRolesAssigned) {
+						writeMsg("Roles have not been assigned yet\n");
+						break;
+					}
+						
+					if(!this.isAlive) {
+						writeMsg("You're dead. Deal with it.\n");
+						break;
+					}
+
+					if(!Server.voteInitiated) {
+						writeMsg("You can't vote right now\n");
+						break;
+					}
+					
+					if(this.hasVoted) {
+						writeMsg("You voted already\n");
+						break;
+					}
+					
+								
+					if(message.equalsIgnoreCase("PASS")) {
+						Server.userFound = true;
+						
+						Server.currentVoteUser = "PASS";
+						Server.skipVoteInitiated = true;
+					} else {
+					
+						for(int i = 0; i < al.size(); ++i) {
+							ClientThread ct = al.get(i);
+							
+							if(ct.username.equalsIgnoreCase(message)) {
+								Server.userFound = true;
+								if(ct.isAlive) {
+
+									//Server.currentVoteUser = ct.username;
+									//Server.voteInitiated = true;
+									ct.lynchScore++;
+									Server.votesCounter++;
+									this.hasVoted = true;
+									
+									broadcast(this.username + " has voted");
+									Server.voteLog += "  " + this.username + " has voted for " + ct.username + "\n";
+									Server.log += "  " + this.username + "(" + this.roleName + ") has voted for " + ct.username + "(" + ct.roleName + ")\n";
+
+								} else {
+									writeMsg("The target is already dead\n");
+								}
+							}
+						}
+					}
+						
+					if(!Server.userFound) {
+						writeMsg("No such user\n");
+					}
+					Server.userFound = false;
+											
+					break;
+					
+				case Message.VOTEYES:
+					if(Server.areRolesAssigned) {
 						if(this.isAlive) {
 							if(!this.hasVoted) {
 								if(Server.gameState == 0 
@@ -582,8 +662,9 @@ public class Server {
 						writeMsg("Roles have not been assigned yet\n");
 					}
 					break;
-				case ChatMessage.VOTENO:
-					if(Server.RolesAssigned) {
+					
+				case Message.VOTENO:
+					if(Server.areRolesAssigned) {
 						if(this.isAlive) {
 							if(!this.hasVoted) {
 								
@@ -614,7 +695,8 @@ public class Server {
 						writeMsg("Roles have not been assigned yet\n");
 					}
 					break;
-				case ChatMessage.NR:
+					
+				case Message.NR:
 					switch(this.role) {
 						case 0:
 							this.role++;
@@ -632,38 +714,108 @@ public class Server {
 					
 					this.isAlive = true;
 					break;
+				case Message.GS:
+					if(!Server.areRolesAssigned) {
+						Server.areRolesAssigned = true;
+					}
+					switch(Server.gameState) {
+					case 0:
+						Server.gameState++;
+						writeMsg("Time to protect\n");
+						break;
+					case 1:
+						Server.gameState++;
+						writeMsg("Time to kill\n");
+						break;
+					case 2:
+						Server.gameState = 0;
+						writeMsg("Time to vote\n");
+						break;
+					}	
 				} 
 				// end of switch
 				
-				if(Server.voteInitiated || Server.skipVote) {
+				
+				if(Server.voteInitiated || Server.skipVoteInitiated) {
 					
-					if(Server.votesCounter == this.getNumberOfAliveUsers() - 1 || Server.skipVote) {
+					if(Server.votesCounter == this.getNumberOfAliveUsers()) {
 						
-						if(Server.votes > 0) {
+						// get lynchPoints for every alive user
+						for(int i = 0; i < al.size(); ++i) {
+							ClientThread ct = al.get(i);
+							if(ct.isAlive) {
+								if(ct.lynchScore > Server.maxLynchPoints) {
+									Server.maxLynchPoints = ct.lynchScore;
+									Server.maxLynchPointsUser = ct.username;
+									ct.canBeVotedAgainst = true;
+								}
+								Server.voteScores += " " + ct.username + " has " + ct.lynchScore + " votes\n";
+							}
+						}
+						
+						broadcast(Server.maxLynchPoints + "");
+						
+						Server.tiebreakers.add(Server.maxLynchPointsUser);
+						// check if vote was a draw
+						for(int i = 0; i < al.size(); ++i) {
+							ClientThread ct = al.get(i);
+							if(ct.isAlive) {
+								if(!ct.username.equalsIgnoreCase(Server.maxLynchPointsUser) 
+									&& ct.lynchScore == Server.maxLynchPoints) {
+									Server.voteIsADraw = true;
+									Server.tiebreakers.add(ct.username);
+									ct.canBeVotedAgainst = true;
+									ct.lynchScore = 0;
+								}
+							}
+						}
+						
+						// if vote was not a draw
+						if(!Server.voteIsADraw) {
 							for(int i = 0; i < al.size(); ++i) {
 								ClientThread ct = al.get(i);
 								
-								if(ct.username.equalsIgnoreCase(Server.currentVoteUser)) {
+								if(ct.username.equalsIgnoreCase(Server.maxLynchPointsUser)) {
 									ct.isAlive = false;
-									Server.voteLog += " " + Server.currentVoteUser + " has been [lynched]. Poor soul.\n-----\n";
-									Server.log += " " + Server.currentVoteUser + "(" + ct.roleName + ") has been lynched. Poor soul.\n-----\n";
+									Server.voteLog += "-----\n" + Server.voteScores + "\n";
+									Server.voteLog += " " + Server.maxLynchPointsUser + " has been [lynched]. Poor soul.\n----------\n";
+									Server.log += " " + Server.maxLynchPointsUser + "(" + ct.roleName + ") has been lynched. Poor soul.\n----------\n";
 									break;
 								}
 							}
-						} else if(Server.skipVote) {
-							Server.voteLog += " The villagers desided to [skip] the day\n-----\n";
-							Server.log += "  The villagers desided to skip the day\n-----\n";
+						} else { // if it was a draw
 							
-							Server.skipVote = false;
-						} else {
-							Server.voteLog += " " + Server.currentVoteUser + " was [NOT lynched]\n-----\n";
-							Server.log += " " + Server.currentVoteUser + "(" + this.roleName + ") was not lynched\n-----\n";
+							Server.voteLog += "-----\n" + Server.voteScores + "\n\n";
+							Server.voteLog += " The vote was a draw\n No one was lynched\n----------\n";
+							Server.log += " No one was lynched\n----------\n";
 						}
 						
+						Server.maxLynchPoints = 0;
+						Server.maxLynchPointsUser = "";
+						Server.voteScores = "";
 						
+						
+						/*// vote skip
+						if(Server.votes > 0) {
+							if(Server.skipVoteInitiated) {
+								Server.voteLog += " The villagers desided to [skip] the day\n-----\n";
+								Server.log += "  The villagers desided to skip the day\n-----\n";
+								
+								Server.skipVoteInitiated = false;
+							}
+						} else {
+							if(Server.skipVoteInitiated) {
+								Server.voteLog += " The villagers desided [NOT to skip] the day\n-----\n";
+								Server.log += "  The villagers desided NOT to skip the day\n-----\n";
+								
+								Server.skipVoteInitiated = false;
+							}
+						}
+						*/
 						
 						Server.noMoreLivingWerewolves = true;
 						
+						// end of vote loop for variable setting on the users
 						for(int i = 0; i < al.size(); ++i) {
 							ClientThread ct = al.get(i);
 							ct.hasVoted = false;
@@ -684,33 +836,40 @@ public class Server {
 						Server.votesCounter = 0;
 						Server.currentVoteUser = "";
 						
-						if(!Server.medicIsDead) {
-							Server.gameState = 1;
-							
-							broadcast("The village falls asleep");
-							broadcast("It's time for the [medic] to make his choice");
-						} else {
-							broadcast("The village falls asleep");
-							broadcast("It's time for the [medic] to make his choice");
-							try {
-								sleep((int) Math.floor(Math.random() * 3000 + 3500));
-							} catch (InterruptedException e) {
+						// if two or more players are alive
+						if(this.getNumberOfAliveUsers() > 2) {
+							// if the medic is alive
+							if(!Server.medicIsDead) {
+								Server.gameState = 1;
 								
+								broadcast("The village falls asleep");
+								broadcast("It's time for the [medic] to make his choice");
+							} else { // if the medic is dead
+								broadcast("The village falls asleep");
+								broadcast("It's time for the [medic] to make his choice");
+								try {
+									sleep((int) Math.floor(Math.random() * 15000 + 20000));
+								} catch (InterruptedException e) {
+									
+								}
+								broadcast("A player has been protected.");
+								
+								Server.gameState = 2;
+								broadcast("It's time for the [werewolves] to make their choice");
 							}
-							
-							Server.gameState = 2;
-							broadcast("It's time for the [werewolves] to make their choice");
 						}
 					}
 				
 				}
 				
+				// if all werewolves are dead
 				if(Server.noMoreLivingWerewolves) {
 					broadcast("Log:\n" + Server.log);
 					broadcast("All werewolves are dead! The [villagers] win!");
 					
 					keepGoing = false;
-				} else {
+				} else { 
+					// if only one villager is left
 					if(this.getNumberOfAliveUsers() == 2) {
 						broadcast("Log:\n" + Server.log);
 						broadcast("Only one villager left. The [werewolves] win!");

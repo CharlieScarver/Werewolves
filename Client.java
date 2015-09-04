@@ -100,7 +100,7 @@ public class Client  {
 	/*
 	 * To send a message to the server
 	 */
-	void sendMessage(ChatMessage msg) {
+	void sendMessage(Message msg) {
 		try {
 			sOutput.writeObject(msg);
 		}
@@ -201,58 +201,66 @@ public class Client  {
 			
 			// logout if message is LOGOUT
 			if(msg.equalsIgnoreCase("LOGOUT")) {
-				client.sendMessage(new ChatMessage(ChatMessage.LOGOUT, ""));
+				client.sendMessage(new Message(Message.LOGOUT, ""));
 				// break to do the disconnect
 				break;
 			}
 			// message WhoIsIn
 			else if(msg.equalsIgnoreCase("WHOISIN")) {
-				client.sendMessage(new ChatMessage(ChatMessage.WHOISIN, ""));				
+				client.sendMessage(new Message(Message.WHOISIN, ""));				
 			}
 			// message Play
 			else if(msg.equalsIgnoreCase("PLAY")) {
-				client.sendMessage(new ChatMessage(ChatMessage.PLAY, ""));
+				client.sendMessage(new Message(Message.PLAY, ""));
 			}
 			// message Role
 			else if(msg.equalsIgnoreCase("ROLE")) {
-				client.sendMessage(new ChatMessage(ChatMessage.ROLE, ""));
+				client.sendMessage(new Message(Message.ROLE, ""));
 			}
 			// message Protect
 			else if(msgSplit[0].equalsIgnoreCase("PROTECT") && msgSplit.length > 1) {
-				client.sendMessage(new ChatMessage(ChatMessage.PROTECT, msgSplit[1]));
+				client.sendMessage(new Message(Message.PROTECT, msgSplit[1]));
 			}
 			// message Kill
 			else if(msgSplit[0].equalsIgnoreCase("KILL") && msgSplit.length > 1) {
-				client.sendMessage(new ChatMessage(ChatMessage.KILL, msgSplit[1]));
+				client.sendMessage(new Message(Message.KILL, msgSplit[1]));
+			}
+			// message StartVote
+			else if(msgSplit[0].equalsIgnoreCase("STARTVOTE")) {
+				client.sendMessage(new Message(Message.STARTVOTE, ""));		
 			}
 			// message Vote
-			else if(msgSplit[0].equalsIgnoreCase("VOTE")) {
-				if(msgSplit.length > 1) {
-					client.sendMessage(new ChatMessage(ChatMessage.VOTE, msgSplit[1]));
-				} else {
-					client.sendMessage(new ChatMessage(ChatMessage.VOTE, "00000000"));	
-				}
+			else if(msgSplit[0].equalsIgnoreCase("VOTE") && msgSplit.length > 1) {
+				client.sendMessage(new Message(Message.VOTE, msgSplit[1]));
 			}
 			// message VoteYes
 			else if(msgSplit[0].equalsIgnoreCase("VOTEYES")) {
-				client.sendMessage(new ChatMessage(ChatMessage.VOTEYES, ""));
+				client.sendMessage(new Message(Message.VOTEYES, ""));
 			}
 			// message VoteNo
 			else if(msgSplit[0].equalsIgnoreCase("VOTENO")) {
-				client.sendMessage(new ChatMessage(ChatMessage.VOTENO, ""));
+				client.sendMessage(new Message(Message.VOTENO, ""));
 			}
 			// message Help
 			else if(msgSplit[0].equalsIgnoreCase("HELP")) {
-				client.sendMessage(new ChatMessage(ChatMessage.HELP, ""));
+				client.sendMessage(new Message(Message.HELP, ""));
+			}
+			// message Clear
+			else if(msgSplit[0].equalsIgnoreCase("CLEAR")) {
+				client.sendMessage(new Message(Message.CLEAR, ""));
 			}
 			// message NextRole
-			/*else if(msgSplit[0].equalsIgnoreCase("NR")) {
-				client.sendMessage(new ChatMessage(ChatMessage.NR, ""));
-			}*/
-			// default to ordinary message
-			else {				
-				client.sendMessage(new ChatMessage(ChatMessage.MESSAGE, msg));
+			else if(msgSplit[0].equalsIgnoreCase("NR")) {
+				client.sendMessage(new Message(Message.NR, ""));
 			}
+			// message GameState
+			else if(msgSplit[0].equalsIgnoreCase("GS")) {
+				client.sendMessage(new Message(Message.GS, ""));
+			}
+			// default to ordinary message
+			/*else {				
+				client.sendMessage(new ChatMessage(ChatMessage.MESSAGE, msg));
+			}*/
 		}
 		// done disconnect
 		client.disconnect();	
